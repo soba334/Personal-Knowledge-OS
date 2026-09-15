@@ -101,6 +101,73 @@ pub struct ListMemoriesQuery {
     pub limit: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CreateEntityRequest {
+    pub entity_type: String,
+    pub canonical_name: String,
+    #[serde(default)]
+    pub attributes: Value,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct EntityRecord {
+    pub id: Uuid,
+    pub entity_type: String,
+    pub canonical_name: String,
+    pub attributes: Value,
+    pub aliases: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateRelationRequest {
+    pub subject_entity_id: Uuid,
+    pub predicate: String,
+    pub object_entity_id: Uuid,
+    pub valid_from: Option<DateTime<Utc>>,
+    pub valid_until: Option<DateTime<Utc>>,
+    pub confidence: Option<f32>,
+    pub source_id: Option<Uuid>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct RelationRecord {
+    pub id: Uuid,
+    pub subject_entity_id: Uuid,
+    pub predicate: String,
+    pub object_entity_id: Uuid,
+    pub valid_from: Option<DateTime<Utc>>,
+    pub valid_until: Option<DateTime<Utc>>,
+    pub confidence: f32,
+    pub source_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EntityGraphResponse {
+    pub entity: EntityRecord,
+    pub outgoing: Vec<RelationRecord>,
+    pub incoming: Vec<RelationRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TimelineQuery {
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TimelineItem {
+    pub source_id: Uuid,
+    pub kind: String,
+    pub title: Option<String>,
+    pub occurred_at: Option<DateTime<Utc>>,
+    pub ingested_at: DateTime<Utc>,
+    pub preview: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
