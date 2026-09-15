@@ -1,0 +1,45 @@
+services:
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/postgres/Dockerfile
+    environment:
+      POSTGRES_USER: pkos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pkos}
+      POSTGRES_DB: pkos
+    ports:
+      - "5432:5432"
+    volumes:
+      - pkos-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pkos -d pkos"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://pkos:${POSTGRES_PASSWORD:-pkos}@postgres:5432/pkos
+      PKOS_OWNER_ID: ${PKOS_OWNER_ID:-00000000-0000-0000-0000-000000000001}
+      PKOS_API_KEY: ${PKOS_API_KEY:?set PKOS_API_KEY in .env}
+      PKOS_BIND_ADDR: 0.0.0.0:8080
+      PKOS_LEXICAL_BACKEND: pgroonga
+      PKOS_WORKER_ENABLED: "true"
+      PKOS_OPENAI_BASE_URL: ${PKOS_OPENAI_BASE_URL:-}
+      PKOS_OPENAI_API_KEY: ${PKOS_OPENAI_API_KEY:-}
+      PKOS_EMBEDDING_MODEL: ${PKOS_EMBEDDING_MODEL:-text-embedding-3-small}
+      PKOS_EMBEDDING_DIMENSIONS: "1536"
+      PKOS_MEMORY_MODEL: ${PKOS_MEMORY_MODEL:-gpt-5-mini}
+      PKOS_MEMORY_EXTRACTION_ENABLED: ${PKOS_MEMORY_EXTRACTION_ENABLED:-false}
+      RUST_LOG: ${RUST_LOG:-personal_knowledge_os=info,tower_http=info}
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  pkos-postgres:
