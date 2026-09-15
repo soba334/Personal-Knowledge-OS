@@ -50,7 +50,10 @@ pub async fn create_capture(
     let mut content = String::new();
     for message in &request.messages {
         let role = message.role.trim().to_ascii_lowercase();
-        if !matches!(role.as_str(), "user" | "assistant" | "system" | "tool" | "agent") {
+        if !matches!(
+            role.as_str(),
+            "user" | "assistant" | "system" | "tool" | "agent"
+        ) {
             return Err(AppError::BadRequest(format!(
                 "unsupported capture role: {}",
                 message.role
