@@ -8,6 +8,7 @@ use crate::{
     AppState,
     error::AppError,
     models::{ApproveMemoryRequest, CreateMemoryCandidateRequest, ListMemoriesQuery, MemoryRecord},
+    storage::MemoryCandidateInput,
 };
 
 pub async fn create_candidate(
@@ -29,18 +30,19 @@ pub async fn create_candidate(
 
     let confidence = request.confidence.unwrap_or(0.8).clamp(0.0, 1.0);
     let importance = request.importance.unwrap_or(0.5).clamp(0.0, 1.0);
+    let input = MemoryCandidateInput {
+        memory_type,
+        statement,
+        confidence,
+        importance,
+        valid_from: request.valid_from,
+        evidence: &request.evidence_source_ids,
+    };
+
     Ok(Json(
         state
             .storage
-            .create_memory_candidate(
-                state.config.owner_id,
-                memory_type,
-                statement,
-                confidence,
-                importance,
-                request.valid_from,
-                &request.evidence_source_ids,
-            )
+            .create_memory_candidate(state.config.owner_id, input)
             .await?,
     ))
 }
