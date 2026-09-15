@@ -9,10 +9,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
+
+AUTO_MEMORY_SOURCE = "For CI, I decided to let AI capture durable knowledge automatically."
+AUTO_MEMORY_STATEMENT = "AI should capture durable knowledge automatically."
 
 
 def request(
@@ -63,7 +67,40 @@ def assert_has(items: list[dict[str, Any]], key: str, value: str, message: str) 
         raise AssertionError(message)
 
 
-def run(base_url: str, api_key: str) -> None:
+def wait_for_automatic_memory(
+    base_url: str,
+    api_key: str,
+    source_id: str,
+    *,
+    timeout_seconds: float = 20.0,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last_memories: list[dict[str, Any]] = []
+    while time.monotonic() < deadline:
+        last_memories = request(
+            base_url,
+            api_key,
+            "GET",
+            "/v1/memories?status=active&limit=50",
+        )
+        for memory in last_memories:
+            if memory.get("statement") != AUTO_MEMORY_STATEMENT:
+                continue
+            if source_id not in memory.get("evidence_source_ids", []):
+                raise AssertionError(
+                    "automatically promoted memory lost its captured source evidence"
+                )
+            if memory.get("status") != "active":
+                raise AssertionError("automatic memory did not reach active state")
+            return memory
+        time.sleep(0.5)
+    raise AssertionError(
+        "automatic grounded memory was not promoted before timeout; "
+        f"last active memories={last_memories!r}"
+    )
+
+
+def run(base_url: str, api_key: str, *, expect_auto_memory: bool) -> None:
     health = request(base_url, api_key, "GET", "/healthz", authenticated=False)
     if health.get("status") != "ok":
         raise AssertionError(f"healthz is not ok: {health}")
@@ -112,6 +149,49 @@ def run(base_url: str, api_key: str) -> None:
         raise AssertionError("lexical retrieval returned no hits for the ingested source")
     if not search.get("degraded"):
         raise AssertionError("search should report degraded=true when embeddings are intentionally disabled")
+
+    capture = request(
+        base_url,
+        api_key,
+        "POST",
+        "/v1/captures",
+        {
+            "kind": "conversation",
+            "title": "CI automatic knowledge capture",
+            "provider": "ci-mock-agent",
+            "session_id": "ci-session-1",
+            "external_id": "ci-auto-capture-v1",
+            "source_uri": "urn:pkos:ci:auto-capture",
+            "occurred_at": "2026-01-11T12:00:00Z",
+            "messages": [
+                {"role": "user", "content": AUTO_MEMORY_SOURCE},
+                {
+                    "role": "assistant",
+                    "content": "I will preserve that decision as source-grounded knowledge.",
+                },
+            ],
+            "metadata": {"suite": "ci-auto-memory"},
+        },
+    )
+    capture_source_id = capture["source"]["id"]
+    fetched_capture = request(
+        base_url,
+        api_key,
+        "GET",
+        f"/v1/sources/{capture_source_id}",
+    )
+    if AUTO_MEMORY_SOURCE not in fetched_capture["content"]:
+        raise AssertionError("captured conversation content was not persisted as source truth")
+
+    automatic_memory: dict[str, Any] | None = None
+    if expect_auto_memory:
+        if not capture.get("memory_extraction_scheduled"):
+            raise AssertionError("capture did not schedule automatic memory extraction")
+        automatic_memory = wait_for_automatic_memory(
+            base_url,
+            api_key,
+            capture_source_id,
+        )
 
     memory = request(
         base_url,
@@ -231,12 +311,20 @@ def run(base_url: str, api_key: str) -> None:
 
     timeline = request(base_url, api_key, "GET", "/v1/timeline?limit=20")
     assert_has(timeline, "source_id", source_id, "ingested source is absent from timeline")
+    assert_has(
+        timeline,
+        "source_id",
+        capture_source_id,
+        "automatic capture source is absent from timeline",
+    )
 
     print(
         json.dumps(
             {
                 "status": "ok",
                 "source_id": source_id,
+                "capture_source_id": capture_source_id,
+                "automatic_memory_id": automatic_memory.get("id") if automatic_memory else None,
                 "memory_id": memory["id"],
                 "relation_id": relation["id"],
                 "search_methods": search["methods"],
@@ -251,9 +339,18 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8080")
     parser.add_argument("--api-key", required=True)
+    parser.add_argument(
+        "--expect-auto-memory",
+        action="store_true",
+        help="require the configured worker/provider to auto-promote a grounded capture",
+    )
     args = parser.parse_args()
     try:
-        run(args.base_url, args.api_key)
+        run(
+            args.base_url,
+            args.api_key,
+            expect_auto_memory=args.expect_auto_memory,
+        )
     except Exception as exc:  # noqa: BLE001 - smoke runner should emit one clear failure.
         print(f"smoke test failed: {exc}", file=sys.stderr)
         return 1
