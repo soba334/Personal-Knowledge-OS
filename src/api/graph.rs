@@ -145,7 +145,10 @@ pub async fn get_relation(
     Path(id): Path<Uuid>,
 ) -> Result<Json<RelationRecord>, AppError> {
     Ok(Json(
-        state.storage.get_relation(state.config.owner_id, id).await?,
+        state
+            .storage
+            .get_relation(state.config.owner_id, id)
+            .await?,
     ))
 }
 
@@ -172,12 +175,7 @@ pub async fn get_entity_graph(
     Ok(Json(
         state
             .storage
-            .get_entity_graph(
-                state.config.owner_id,
-                id,
-                as_of,
-                query.include_historical,
-            )
+            .get_entity_graph(state.config.owner_id, id, as_of, query.include_historical)
             .await?,
     ))
 }
@@ -192,10 +190,7 @@ fn validate_nonempty(field: &str, value: &str, max_chars: usize) -> Result<(), A
     Ok(())
 }
 
-fn normalize_aliases(
-    aliases: Vec<String>,
-    canonical_name: &str,
-) -> Result<Vec<String>, AppError> {
+fn normalize_aliases(aliases: Vec<String>, canonical_name: &str) -> Result<Vec<String>, AppError> {
     if aliases.len() > 100 {
         return Err(AppError::BadRequest(
             "aliases must contain at most 100 values".into(),

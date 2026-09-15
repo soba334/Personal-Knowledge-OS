@@ -143,13 +143,12 @@ impl Storage {
 
         let mut tx = self.pool().begin().await?;
         let entity_ids = [input.subject_entity_id, input.object_entity_id];
-        let owned_entities: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM entities WHERE owner_id=$1 AND id=ANY($2)",
-        )
-        .bind(owner_id)
-        .bind(&entity_ids[..])
-        .fetch_one(&mut *tx)
-        .await?;
+        let owned_entities: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM entities WHERE owner_id=$1 AND id=ANY($2)")
+                .bind(owner_id)
+                .bind(&entity_ids[..])
+                .fetch_one(&mut *tx)
+                .await?;
         if owned_entities != 2 {
             return Err(AppError::BadRequest(
                 "both relation entities must exist for the current owner".into(),
@@ -209,11 +208,7 @@ impl Storage {
         relation_from_row(&row)
     }
 
-    pub async fn get_relation(
-        &self,
-        owner_id: Uuid,
-        id: Uuid,
-    ) -> Result<RelationRecord, AppError> {
+    pub async fn get_relation(&self, owner_id: Uuid, id: Uuid) -> Result<RelationRecord, AppError> {
         let row = sqlx::query(
             r#"SELECT id,subject_entity_id,predicate,object_entity_id,valid_from,valid_until,confidence,source_id,created_at
                FROM relations WHERE owner_id=$1 AND id=$2"#,
