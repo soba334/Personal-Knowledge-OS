@@ -15,6 +15,15 @@ pub struct Storage {
     pool: PgPool,
 }
 
+pub struct MemoryCandidateInput<'a> {
+    pub memory_type: &'a str,
+    pub statement: &'a str,
+    pub confidence: f32,
+    pub importance: f32,
+    pub valid_from: Option<DateTime<Utc>>,
+    pub evidence: &'a [Uuid],
+}
+
 impl Storage {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -208,14 +217,9 @@ impl Storage {
     pub async fn create_memory_candidate(
         &self,
         owner_id: Uuid,
-        memory_type: &str,
-        statement: &str,
-        confidence: f32,
-        importance: f32,
-        valid_from: Option<DateTime<Utc>>,
-        evidence: &[Uuid],
+        input: MemoryCandidateInput<'_>,
     ) -> Result<MemoryRecord, AppError> {
-        if evidence.is_empty() {
+        if input.evidence.is_empty() {
             return Err(AppError::BadRequest(
                 "memory requires at least one evidence source".into(),
             ));
@@ -224,19 +228,19 @@ impl Storage {
         let count: i64 =
             sqlx::query_scalar("SELECT count(*) FROM sources WHERE owner_id=$1 AND id=ANY($2)")
                 .bind(owner_id)
-                .bind(evidence)
+                .bind(input.evidence)
                 .fetch_one(&mut *tx)
                 .await?;
-        if count != evidence.len() as i64 {
+        if count != input.evidence.len() as i64 {
             return Err(AppError::BadRequest(
                 "one or more evidence sources do not exist".into(),
             ));
         }
         let id = Uuid::now_v7();
         sqlx::query("INSERT INTO memories (id,owner_id,memory_type,statement,status,confidence,importance,valid_from) VALUES ($1,$2,$3,$4,'candidate',$5,$6,$7)")
-            .bind(id).bind(owner_id).bind(memory_type).bind(statement).bind(confidence).bind(importance).bind(valid_from)
+            .bind(id).bind(owner_id).bind(input.memory_type).bind(input.statement).bind(input.confidence).bind(input.importance).bind(input.valid_from)
             .execute(&mut *tx).await?;
-        for source_id in evidence {
+        for source_id in input.evidence {
             sqlx::query("INSERT INTO memory_evidence (memory_id,source_id) VALUES ($1,$2) ON CONFLICT DO NOTHING")
                 .bind(id).bind(source_id).execute(&mut *tx).await?;
         }
@@ -468,10 +472,10 @@ impl Storage {
 }
 
 fn map_unique_conflict(err: sqlx::Error) -> AppError {
-    if let sqlx::Error::Database(db) = &err {
-        if db.code().as_deref() == Some("23505") {
-            return AppError::Conflict("source external_id already exists".into());
-        }
+    if let sqlx::Error::Database(db) = &err
+        && db.code().as_deref() == Some("23505")
+    {
+        return AppError::Conflict("source external_id already exists".into());
     }
     AppError::Database(err)
 }
