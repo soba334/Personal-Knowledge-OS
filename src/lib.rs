@@ -5,6 +5,7 @@ pub mod error;
 pub mod models;
 pub mod services;
 pub mod storage;
+pub mod storage_graph;
 
 use std::{sync::Arc, time::Duration};
 
