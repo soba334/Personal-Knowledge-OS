@@ -21,7 +21,10 @@ use tower_http::{
 };
 
 use crate::{
-    config::Config, error::AppError, services::embedding::EmbeddingClient, storage::Storage,
+    config::Config,
+    error::AppError,
+    services::{embedding::EmbeddingClient, memory_extraction::MemoryExtractionClient},
+    storage::Storage,
 };
 
 #[derive(Clone)]
@@ -29,6 +32,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub storage: Storage,
     pub embeddings: EmbeddingClient,
+    pub memory_extractor: MemoryExtractionClient,
 }
 
 impl AppState {
@@ -42,10 +46,12 @@ impl AppState {
         sqlx::migrate!("./migrations").run(&pool).await?;
 
         let embeddings = EmbeddingClient::new(&config)?;
+        let memory_extractor = MemoryExtractionClient::new(&config)?;
         Ok(Self {
             config: Arc::new(config),
             storage: Storage::new(pool),
             embeddings,
+            memory_extractor,
         })
     }
 }

@@ -1,7 +1,7 @@
 use std::time::Duration;
 use uuid::Uuid;
 
-use crate::{AppState, error::AppError};
+use crate::{AppState, error::AppError, services::memory_extraction};
 
 pub async fn run(state: AppState) -> Result<(), AppError> {
     loop {
@@ -75,10 +75,8 @@ async fn process(
             Ok(())
         }
         "extract_memories" => {
-            // Safety invariant: unverified model output never becomes active memory.
-            // The extraction hook is retained until verifier-backed extraction is enabled.
-            tracing::info!(payload=%payload,"memory extraction job retained without activation");
-            Ok(())
+            let source_id = parse_uuid(payload, "source_id")?;
+            memory_extraction::process_source(state, source_id).await
         }
         _ => Err(AppError::BadRequest(format!("unknown job kind: {kind}"))),
     }

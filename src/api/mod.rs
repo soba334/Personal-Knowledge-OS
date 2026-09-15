@@ -5,6 +5,7 @@ use axum::{
 
 use crate::{AppState, auth};
 
+mod capture;
 mod graph;
 mod health;
 mod memories;
@@ -14,6 +15,7 @@ mod timeline;
 
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
+        .route("/v1/captures", post(capture::create_capture))
         .route("/v1/sources", post(sources::create_source))
         .route("/v1/sources/{id}", get(sources::get_source))
         .route("/v1/search", post(search::search))
