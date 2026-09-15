@@ -10,7 +10,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pkos-postgres:/var/lib/postgresql/data
+      - pkos-postgres:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pkos -d pkos"]
       interval: 5s
