@@ -111,6 +111,13 @@ pub struct CreateEntityRequest {
     pub aliases: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ListEntitiesQuery {
+    pub query: Option<String>,
+    pub entity_type: Option<String>,
+    pub limit: Option<i64>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct EntityRecord {
     pub id: Uuid,
@@ -133,6 +140,11 @@ pub struct CreateRelationRequest {
     pub source_id: Option<Uuid>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CloseRelationRequest {
+    pub valid_until: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct RelationRecord {
     pub id: Uuid,
@@ -146,6 +158,13 @@ pub struct RelationRecord {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct EntityGraphQuery {
+    pub as_of: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub include_historical: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct EntityGraphResponse {
     pub entity: EntityRecord,
@@ -156,6 +175,7 @@ pub struct EntityGraphResponse {
 #[derive(Debug, Deserialize)]
 pub struct TimelineQuery {
     pub limit: Option<i64>,
+    pub before: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Serialize)]
