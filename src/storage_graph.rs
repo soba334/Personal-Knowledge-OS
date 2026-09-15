@@ -9,6 +9,16 @@ use crate::{
     storage::Storage,
 };
 
+pub struct RelationInput<'a> {
+    pub subject_entity_id: Uuid,
+    pub predicate: &'a str,
+    pub object_entity_id: Uuid,
+    pub valid_from: Option<DateTime<Utc>>,
+    pub valid_until: Option<DateTime<Utc>>,
+    pub confidence: f32,
+    pub source_id: Option<Uuid>,
+}
+
 impl Storage {
     pub async fn create_entity(
         &self,
@@ -24,7 +34,7 @@ impl Storage {
         let inserted = sqlx::query(
             r#"INSERT INTO entities (id,owner_id,entity_type,canonical_name,attributes)
                VALUES ($1,$2,$3,$4,$5)
-               ON CONFLICT (owner_id,entity_type,lower(canonical_name)) DO NOTHING
+               ON CONFLICT DO NOTHING
                RETURNING id"#,
         )
         .bind(id)
@@ -113,24 +123,17 @@ impl Storage {
         rows.iter().map(entity_from_row).collect()
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn create_relation(
         &self,
         owner_id: Uuid,
-        subject_entity_id: Uuid,
-        predicate: &str,
-        object_entity_id: Uuid,
-        valid_from: Option<DateTime<Utc>>,
-        valid_until: Option<DateTime<Utc>>,
-        confidence: f32,
-        source_id: Option<Uuid>,
+        input: RelationInput<'_>,
     ) -> Result<RelationRecord, AppError> {
-        if subject_entity_id == object_entity_id {
+        if input.subject_entity_id == input.object_entity_id {
             return Err(AppError::BadRequest(
                 "subject_entity_id and object_entity_id must differ".into(),
             ));
         }
-        if let (Some(from), Some(until)) = (valid_from, valid_until)
+        if let (Some(from), Some(until)) = (input.valid_from, input.valid_until)
             && until < from
         {
             return Err(AppError::BadRequest(
@@ -139,7 +142,7 @@ impl Storage {
         }
 
         let mut tx = self.pool().begin().await?;
-        let entity_ids = [subject_entity_id, object_entity_id];
+        let entity_ids = [input.subject_entity_id, input.object_entity_id];
         let owned_entities: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM entities WHERE owner_id=$1 AND id=ANY($2)",
         )
@@ -153,7 +156,7 @@ impl Storage {
             ));
         }
 
-        if let Some(source_id) = source_id {
+        if let Some(source_id) = input.source_id {
             let source_exists: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM sources WHERE owner_id=$1 AND id=$2)",
             )
@@ -177,13 +180,13 @@ impl Storage {
         )
         .bind(id)
         .bind(owner_id)
-        .bind(subject_entity_id)
-        .bind(predicate)
-        .bind(object_entity_id)
-        .bind(valid_from)
-        .bind(valid_until)
-        .bind(confidence)
-        .bind(source_id)
+        .bind(input.subject_entity_id)
+        .bind(input.predicate)
+        .bind(input.object_entity_id)
+        .bind(input.valid_from)
+        .bind(input.valid_until)
+        .bind(input.confidence)
+        .bind(input.source_id)
         .fetch_one(&mut *tx)
         .await?;
 
@@ -194,10 +197,10 @@ impl Storage {
             "relation",
             id,
             serde_json::json!({
-                "subject_entity_id": subject_entity_id,
-                "predicate": predicate,
-                "object_entity_id": object_entity_id,
-                "source_id": source_id,
+                "subject_entity_id": input.subject_entity_id,
+                "predicate": input.predicate,
+                "object_entity_id": input.object_entity_id,
+                "source_id": input.source_id,
             }),
         )
         .await?;
