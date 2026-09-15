@@ -1,0 +1,2 @@
+{"id":"source-of-truth","query":"What is the source of truth?","relevant_source_ids":["00000000-0000-0000-0000-000000000000"],"must_abstain":false}
+{"id":"unknown-fact","query":"What fact has never been recorded?","relevant_source_ids":[],"must_abstain":true}
