@@ -45,6 +45,8 @@ services:
       PKOS_MEMORY_MAX_CANDIDATES_PER_SOURCE: ${PKOS_MEMORY_MAX_CANDIDATES_PER_SOURCE:-8}
       PKOS_MEMORY_CONTEXT_LIMIT: ${PKOS_MEMORY_CONTEXT_LIMIT:-50}
       RUST_LOG: ${RUST_LOG:-personal_knowledge_os=info,tower_http=info}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
     restart: unless-stopped
