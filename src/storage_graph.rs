@@ -270,30 +270,36 @@ impl Storage {
         include_historical: bool,
     ) -> Result<EntityGraphResponse, AppError> {
         let entity = self.get_entity(owner_id, id).await?;
-        let relation_sql = r#"SELECT id,subject_entity_id,predicate,object_entity_id,valid_from,valid_until,confidence,source_id,created_at
-                              FROM relations
-                              WHERE owner_id=$1 AND {direction}=$2
-                                AND ($3 OR ((valid_from IS NULL OR valid_from <= $4)
-                                         AND (valid_until IS NULL OR valid_until > $4)))
-                              ORDER BY predicate, valid_from DESC NULLS LAST, created_at DESC"#;
 
-        let outgoing_sql = relation_sql.replace("{direction}", "subject_entity_id");
-        let incoming_sql = relation_sql.replace("{direction}", "object_entity_id");
+        let outgoing_rows = sqlx::query(
+            r#"SELECT id,subject_entity_id,predicate,object_entity_id,valid_from,valid_until,confidence,source_id,created_at
+               FROM relations
+               WHERE owner_id=$1 AND subject_entity_id=$2
+                 AND ($3 OR ((valid_from IS NULL OR valid_from <= $4)
+                          AND (valid_until IS NULL OR valid_until > $4)))
+               ORDER BY predicate, valid_from DESC NULLS LAST, created_at DESC"#,
+        )
+        .bind(owner_id)
+        .bind(id)
+        .bind(include_historical)
+        .bind(as_of)
+        .fetch_all(self.pool())
+        .await?;
 
-        let outgoing_rows = sqlx::query(&outgoing_sql)
-            .bind(owner_id)
-            .bind(id)
-            .bind(include_historical)
-            .bind(as_of)
-            .fetch_all(self.pool())
-            .await?;
-        let incoming_rows = sqlx::query(&incoming_sql)
-            .bind(owner_id)
-            .bind(id)
-            .bind(include_historical)
-            .bind(as_of)
-            .fetch_all(self.pool())
-            .await?;
+        let incoming_rows = sqlx::query(
+            r#"SELECT id,subject_entity_id,predicate,object_entity_id,valid_from,valid_until,confidence,source_id,created_at
+               FROM relations
+               WHERE owner_id=$1 AND object_entity_id=$2
+                 AND ($3 OR ((valid_from IS NULL OR valid_from <= $4)
+                          AND (valid_until IS NULL OR valid_until > $4)))
+               ORDER BY predicate, valid_from DESC NULLS LAST, created_at DESC"#,
+        )
+        .bind(owner_id)
+        .bind(id)
+        .bind(include_historical)
+        .bind(as_of)
+        .fetch_all(self.pool())
+        .await?;
 
         Ok(EntityGraphResponse {
             entity,
