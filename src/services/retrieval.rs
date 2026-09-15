@@ -9,6 +9,10 @@ use crate::{
 
 const RRF_K: f64 = 60.0;
 
+fn rrf_score(rank: usize) -> f64 {
+    1.0 / (RRF_K + rank as f64 + 1.0)
+}
+
 #[derive(Default)]
 struct Acc {
     kind: String,
@@ -72,7 +76,7 @@ pub async fn search(state: &AppState, request: SearchRequest) -> Result<SearchRe
                 evidence: vec![hit.source_id],
                 ..Default::default()
             });
-        entry.score += 1.0 / (RRF_K + rank as f64 + 1.0);
+        entry.score += rrf_score(rank);
         entry.lexical = Some(hit.score);
     }
 
@@ -106,7 +110,7 @@ pub async fn search(state: &AppState, request: SearchRequest) -> Result<SearchRe
                     evidence: hit.evidence_source_ids.clone(),
                     ..Default::default()
                 });
-            entry.score += 1.0 / (RRF_K + rank as f64 + 1.0);
+            entry.score += rrf_score(rank);
             entry.lexical = Some(hit.score);
         }
     }
@@ -133,7 +137,7 @@ pub async fn search(state: &AppState, request: SearchRequest) -> Result<SearchRe
                         evidence: vec![hit.source_id],
                         ..Default::default()
                     });
-                entry.score += 1.0 / (RRF_K + rank as f64 + 1.0);
+                entry.score += rrf_score(rank);
                 entry.dense = Some(hit.score);
             }
             if request.include_memories {
@@ -156,7 +160,7 @@ pub async fn search(state: &AppState, request: SearchRequest) -> Result<SearchRe
                             evidence: hit.evidence_source_ids.clone(),
                             ..Default::default()
                         });
-                    entry.score += 1.0 / (RRF_K + rank as f64 + 1.0);
+                    entry.score += rrf_score(rank);
                     entry.dense = Some(hit.score);
                 }
             }
@@ -215,9 +219,14 @@ pub async fn search(state: &AppState, request: SearchRequest) -> Result<SearchRe
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::rrf_score;
+
     #[test]
     fn rrf_rewards_better_rank() {
-        assert!(1.0 / (RRF_K + 1.0) > 1.0 / (RRF_K + 10.0));
+        let first = rrf_score(0);
+        let tenth = rrf_score(9);
+        assert!(first > tenth);
+        assert!(first.is_finite());
+        assert!(tenth.is_finite());
     }
 }
