@@ -8,7 +8,10 @@ pub mod storage;
 
 use std::{sync::Arc, time::Duration};
 
-use axum::{Router, http::HeaderName};
+use axum::{
+    Router,
+    http::{HeaderName, StatusCode},
+};
 use sqlx::postgres::PgPoolOptions;
 use tower_http::{
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
@@ -52,6 +55,9 @@ pub fn build_app(state: AppState) -> Router {
     api::router(state)
         .layer(PropagateRequestIdLayer::new(request_id_header.clone()))
         .layer(SetRequestIdLayer::new(request_id_header, MakeRequestUuid))
-        .layer(TimeoutLayer::new(Duration::from_secs(30)))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(30),
+        ))
         .layer(TraceLayer::new_for_http())
 }
