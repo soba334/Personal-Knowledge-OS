@@ -17,10 +17,7 @@ use tower_http::{
 };
 
 use crate::{
-    config::Config,
-    error::AppError,
-    services::embedding::EmbeddingClient,
-    storage::Storage,
+    config::Config, error::AppError, services::embedding::EmbeddingClient, storage::Storage,
 };
 
 #[derive(Clone)]
@@ -54,10 +51,7 @@ pub fn build_app(state: AppState) -> Router {
 
     api::router(state)
         .layer(PropagateRequestIdLayer::new(request_id_header.clone()))
-        .layer(SetRequestIdLayer::new(
-            request_id_header,
-            MakeRequestUuid,
-        ))
+        .layer(SetRequestIdLayer::new(request_id_header, MakeRequestUuid))
         .layer(TimeoutLayer::new(Duration::from_secs(30)))
         .layer(TraceLayer::new_for_http())
 }

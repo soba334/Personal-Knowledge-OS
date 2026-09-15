@@ -53,22 +53,42 @@ impl EmbeddingClient {
             return Ok(None);
         };
 
-        let response = self.http
+        let response = self
+            .http
             .post(format!("{}/embeddings", base_url.trim_end_matches('/')))
             .bearer_auth(api_key)
-            .json(&EmbeddingRequest { model: &self.model, input, dimensions: self.dimensions })
+            .json(&EmbeddingRequest {
+                model: &self.model,
+                input,
+                dimensions: self.dimensions,
+            })
             .send()
             .await
             .map_err(|err| AppError::Upstream(err.to_string()))?;
 
         if !response.status().is_success() {
-            return Err(AppError::Upstream(format!("embedding provider returned {}", response.status())));
+            return Err(AppError::Upstream(format!(
+                "embedding provider returned {}",
+                response.status()
+            )));
         }
 
-        let body: EmbeddingResponse = response.json().await.map_err(|err| AppError::Upstream(err.to_string()))?;
-        let vector = body.data.into_iter().next().ok_or_else(|| AppError::Upstream("embedding response contained no vectors".into()))?.embedding;
+        let body: EmbeddingResponse = response
+            .json()
+            .await
+            .map_err(|err| AppError::Upstream(err.to_string()))?;
+        let vector = body
+            .data
+            .into_iter()
+            .next()
+            .ok_or_else(|| AppError::Upstream("embedding response contained no vectors".into()))?
+            .embedding;
         if vector.len() != self.dimensions {
-            return Err(AppError::Upstream(format!("embedding dimension mismatch: expected {}, got {}", self.dimensions, vector.len())));
+            return Err(AppError::Upstream(format!(
+                "embedding dimension mismatch: expected {}, got {}",
+                self.dimensions,
+                vector.len()
+            )));
         }
         Ok(Some(vector))
     }

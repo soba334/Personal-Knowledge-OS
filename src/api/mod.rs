@@ -1,4 +1,7 @@
-use axum::{Router, middleware, routing::{get, post}};
+use axum::{
+    Router, middleware,
+    routing::{get, post},
+};
 
 use crate::{AppState, auth};
 
@@ -17,7 +20,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/memories/{id}", get(memories::get_memory))
         .route("/v1/memories/{id}/approve", post(memories::approve_memory))
         .route("/v1/memories/{id}/reject", post(memories::reject_memory))
-        .route_layer(middleware::from_fn_with_state(state.clone(), auth::require_auth));
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth,
+        ));
 
     Router::new()
         .route("/healthz", get(health::health))

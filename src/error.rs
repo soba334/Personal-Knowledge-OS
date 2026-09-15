@@ -1,4 +1,8 @@
-use axum::{Json, http::StatusCode, response::{IntoResponse, Response}};
+use axum::{
+    Json,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -40,9 +44,10 @@ impl IntoResponse for AppError {
             AppError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
-            AppError::Database(_) | AppError::Migration(_) | AppError::Upstream(_) | AppError::Config(_) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal_error")
-            }
+            AppError::Database(_)
+            | AppError::Migration(_)
+            | AppError::Upstream(_)
+            | AppError::Config(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
         };
 
         let message = if status.is_server_error() {
@@ -52,6 +57,12 @@ impl IntoResponse for AppError {
             self.to_string()
         };
 
-        (status, Json(ErrorBody { error: ErrorPayload { code, message } })).into_response()
+        (
+            status,
+            Json(ErrorBody {
+                error: ErrorPayload { code, message },
+            }),
+        )
+            .into_response()
     }
 }

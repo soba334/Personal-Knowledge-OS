@@ -32,7 +32,11 @@ pub fn chunk_text(input: &str, target_chars: usize, overlap_chars: usize) -> Vec
             }
         }
 
-        let content: String = chars[start..end].iter().collect::<String>().trim().to_string();
+        let content: String = chars[start..end]
+            .iter()
+            .collect::<String>()
+            .trim()
+            .to_string();
         if !content.is_empty() {
             chunks.push(Chunk {
                 position,

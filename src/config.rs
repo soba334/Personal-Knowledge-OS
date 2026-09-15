@@ -67,7 +67,8 @@ impl Config {
             worker_enabled: parse_bool("PKOS_WORKER_ENABLED", true)?,
             openai_base_url: optional("PKOS_OPENAI_BASE_URL"),
             openai_api_key: optional("PKOS_OPENAI_API_KEY"),
-            embedding_model: env::var("PKOS_EMBEDDING_MODEL").unwrap_or_else(|_| "text-embedding-3-small".into()),
+            embedding_model: env::var("PKOS_EMBEDDING_MODEL")
+                .unwrap_or_else(|_| "text-embedding-3-small".into()),
             embedding_dimensions,
             memory_model: env::var("PKOS_MEMORY_MODEL").unwrap_or_else(|_| "gpt-5-mini".into()),
             memory_extraction_enabled: parse_bool("PKOS_MEMORY_EXTRACTION_ENABLED", false)?,
@@ -76,7 +77,10 @@ impl Config {
 }
 
 fn required(name: &'static str) -> Result<String, ConfigError> {
-    env::var(name).ok().filter(|v| !v.trim().is_empty()).ok_or(ConfigError::Missing(name))
+    env::var(name)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .ok_or(ConfigError::Missing(name))
 }
 
 fn optional(name: &'static str) -> Option<String> {
@@ -91,7 +95,10 @@ where
     env::var(name)
         .unwrap_or_else(|_| default.to_string())
         .parse()
-        .map_err(|err: T::Err| ConfigError::Invalid { name, message: err.to_string() })
+        .map_err(|err: T::Err| ConfigError::Invalid {
+            name,
+            message: err.to_string(),
+        })
 }
 
 fn parse_bool(name: &'static str, default: bool) -> Result<bool, ConfigError> {
@@ -99,7 +106,10 @@ fn parse_bool(name: &'static str, default: bool) -> Result<bool, ConfigError> {
         Ok(value) => match value.to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => Ok(true),
             "0" | "false" | "no" | "off" => Ok(false),
-            _ => Err(ConfigError::Invalid { name, message: "expected boolean".into() }),
+            _ => Err(ConfigError::Invalid {
+                name,
+                message: "expected boolean".into(),
+            }),
         },
         Err(_) => Ok(default),
     }

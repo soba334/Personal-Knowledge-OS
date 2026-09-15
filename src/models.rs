@@ -37,7 +37,9 @@ pub struct SearchRequest {
     pub include_memories: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Serialize, Clone)]
 pub struct SearchHit {
