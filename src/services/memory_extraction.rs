@@ -128,7 +128,10 @@ impl MemoryExtractionClient {
 
         let response = self
             .http
-            .post(format!("{}/chat/completions", base_url.trim_end_matches('/')))
+            .post(format!(
+                "{}/chat/completions",
+                base_url.trim_end_matches('/')
+            ))
             .bearer_auth(api_key)
             .json(&ChatRequest {
                 model: &self.model,
@@ -213,7 +216,9 @@ pub async fn process_source(state: &AppState, source_id: Uuid) -> Result<(), App
             }
             if status == "candidate" {
                 if should_auto_promote(state, &candidate) {
-                    let supersedes = resolve_supersedes(state, candidate.supersedes_memory_id.as_deref()).await?;
+                    let supersedes =
+                        resolve_supersedes(state, candidate.supersedes_memory_id.as_deref())
+                            .await?;
                     if candidate.supersedes_memory_id.is_some() && supersedes.is_none() {
                         continue;
                     }
@@ -234,7 +239,8 @@ pub async fn process_source(state: &AppState, source_id: Uuid) -> Result<(), App
             continue;
         }
 
-        let supersedes = resolve_supersedes(state, candidate.supersedes_memory_id.as_deref()).await?;
+        let supersedes =
+            resolve_supersedes(state, candidate.supersedes_memory_id.as_deref()).await?;
         if candidate.supersedes_memory_id.is_some() && supersedes.is_none() {
             tracing::info!(source_id=%source.id, statement=%statement, "candidate referenced a non-active superseded memory; discarded");
             continue;
@@ -335,7 +341,10 @@ async fn resolve_supersedes(
     Ok(active.then_some(id))
 }
 
-fn validate_candidate(source: &SourceRecord, candidate: &ExtractedMemory) -> Result<(), &'static str> {
+fn validate_candidate(
+    source: &SourceRecord,
+    candidate: &ExtractedMemory,
+) -> Result<(), &'static str> {
     let memory_type = candidate.memory_type.trim();
     if !matches!(
         memory_type,
@@ -407,7 +416,11 @@ fn content_to_text(content: &Value) -> Option<String> {
     let items = content.as_array()?;
     let parts: Vec<&str> = items
         .iter()
-        .filter_map(|item| item.get("text").and_then(Value::as_str).or_else(|| item.get("content").and_then(Value::as_str)))
+        .filter_map(|item| {
+            item.get("text")
+                .and_then(Value::as_str)
+                .or_else(|| item.get("content").and_then(Value::as_str))
+        })
         .collect();
     (!parts.is_empty()).then(|| parts.join("\n"))
 }
