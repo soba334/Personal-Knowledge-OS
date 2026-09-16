@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pkos}
       POSTGRES_DB: pkos
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pkos-postgres:/var/lib/postgresql
     healthcheck:
@@ -48,7 +48,26 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+  mcp:
+    build:
+      context: .
+      dockerfile: mcp/Dockerfile
+    depends_on:
+      - api
+    environment:
+      PKOS_MCP_API_BASE_URL: http://api:8080
+      PKOS_API_KEY: ${PKOS_API_KEY:?set PKOS_API_KEY in .env}
+      PKOS_MCP_BEARER_TOKEN: ${PKOS_MCP_BEARER_TOKEN:?set PKOS_MCP_BEARER_TOKEN in .env}
+      PKOS_MCP_BIND: 0.0.0.0
+      PKOS_MCP_PORT: "8787"
+      PKOS_MCP_PUBLIC_HOSTNAME: ${PKOS_MCP_PUBLIC_HOSTNAME:-}
+      PKOS_MCP_ALLOWED_HOSTS: ${PKOS_MCP_ALLOWED_HOSTS:-}
+      PKOS_MCP_ALLOWED_ORIGINS: ${PKOS_MCP_ALLOWED_ORIGINS:-}
+    ports:
+      - "127.0.0.1:8787:8787"
     restart: unless-stopped
 
 volumes:
