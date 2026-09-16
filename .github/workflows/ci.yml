@@ -35,10 +35,17 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Validate MCP JavaScript
+        run: |
+          cd mcp
+          npm install --ignore-scripts --no-audit --no-fund
+          npm run validate
       - name: Build API image
         run: docker build -t personal-knowledge-os:test .
       - name: Build PostgreSQL extension image
         run: docker build -f docker/postgres/Dockerfile -t personal-knowledge-os-postgres:test .
+      - name: Build MCP gateway image
+        run: docker build -f mcp/Dockerfile -t personal-knowledge-os-mcp:test .
 
   integration:
     needs: [rust, docker]
@@ -48,6 +55,7 @@ jobs:
       POSTGRES_PASSWORD: ci-postgres-password
       PKOS_OWNER_ID: 00000000-0000-0000-0000-000000000001
       PKOS_API_KEY: ci-pkos-api-key-0123456789abcdef0123456789abcdef
+      PKOS_MCP_BEARER_TOKEN: ci-pkos-mcp-token-0123456789abcdef0123456789abcdef
       PKOS_WORKER_ENABLED: "true"
       PKOS_MEMORY_BASE_URL: http://host.docker.internal:18080/v1
       PKOS_MEMORY_API_KEY: ci-mock-memory-key
@@ -72,16 +80,22 @@ jobs:
           exit 1
       - name: Start production-shaped stack
         run: docker compose up -d --build
-      - name: Wait for readiness
+      - name: Wait for API and MCP readiness
         run: |
           for attempt in $(seq 1 90); do
-            if curl --fail --silent --show-error http://127.0.0.1:8080/readyz >/dev/null; then
+            api_ok=false
+            mcp_ok=false
+            curl --fail --silent --show-error http://127.0.0.1:8080/readyz >/dev/null && api_ok=true || true
+            curl --fail --silent --show-error http://127.0.0.1:8787/healthz >/dev/null && mcp_ok=true || true
+            if [ "$api_ok" = true ] && [ "$mcp_ok" = true ]; then
               exit 0
             fi
             sleep 2
           done
-          echo "API did not become ready" >&2
+          echo "API or MCP did not become ready" >&2
           exit 1
+      - name: Exercise remote MCP write, read, search, and automatic memory flows
+        run: python3 scripts/mcp_smoke_test.py --token "$PKOS_MCP_BEARER_TOKEN"
       - name: Exercise source, capture, automatic memory, graph, and timeline flows
         run: python3 scripts/smoke_test.py --api-key "$PKOS_API_KEY" --expect-auto-memory
       - name: Dump logs on failure
