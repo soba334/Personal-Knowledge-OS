@@ -76,6 +76,7 @@ def wait_for_automatic_memory(
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     last_memories: list[dict[str, Any]] = []
+    saw_matching_memory = False
     while time.monotonic() < deadline:
         last_memories = request(
             base_url,
@@ -86,14 +87,21 @@ def wait_for_automatic_memory(
         for memory in last_memories:
             if memory.get("statement") != AUTO_MEMORY_STATEMENT:
                 continue
+            saw_matching_memory = True
+            # A previous test/source may already have activated the same normalized memory.
+            # The worker reinforces that memory by attaching this Source evidence asynchronously,
+            # so keep polling until the evidence link is visible instead of failing the race.
             if source_id not in memory.get("evidence_source_ids", []):
-                raise AssertionError(
-                    "automatically promoted memory lost its captured source evidence"
-                )
+                continue
             if memory.get("status") != "active":
                 raise AssertionError("automatic memory did not reach active state")
             return memory
         time.sleep(0.5)
+    if saw_matching_memory:
+        raise AssertionError(
+            "automatic memory existed but was not reinforced with the captured source evidence "
+            f"before timeout; source_id={source_id}; last active memories={last_memories!r}"
+        )
     raise AssertionError(
         "automatic grounded memory was not promoted before timeout; "
         f"last active memories={last_memories!r}"
@@ -339,18 +347,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8080")
     parser.add_argument("--api-key", required=True)
-    parser.add_argument(
-        "--expect-auto-memory",
-        action="store_true",
-        help="require the configured worker/provider to auto-promote a grounded capture",
-    )
+    parser.add_argument("--expect-auto-memory", action="store_true")
     args = parser.parse_args()
     try:
-        run(
-            args.base_url,
-            args.api_key,
-            expect_auto_memory=args.expect_auto_memory,
-        )
+        run(args.base_url, args.api_key, expect_auto_memory=args.expect_auto_memory)
     except Exception as exc:  # noqa: BLE001 - smoke runner should emit one clear failure.
         print(f"smoke test failed: {exc}", file=sys.stderr)
         return 1
