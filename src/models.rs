@@ -30,6 +30,38 @@ pub struct SourceRecord {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct CaptureMessage {
+    pub role: String,
+    pub content: String,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateCaptureRequest {
+    #[serde(default = "default_capture_kind")]
+    pub kind: String,
+    pub title: Option<String>,
+    pub provider: Option<String>,
+    pub session_id: Option<String>,
+    pub external_id: Option<String>,
+    pub source_uri: Option<String>,
+    pub occurred_at: Option<DateTime<Utc>>,
+    pub messages: Vec<CaptureMessage>,
+    #[serde(default)]
+    pub metadata: Value,
+}
+
+fn default_capture_kind() -> String {
+    "conversation".into()
+}
+
+#[derive(Debug, Serialize)]
+pub struct CaptureResponse {
+    pub source: SourceRecord,
+    pub memory_extraction_scheduled: bool,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SearchRequest {
     pub query: String,
     pub limit: Option<usize>,

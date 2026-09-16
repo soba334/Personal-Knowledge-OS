@@ -48,10 +48,28 @@ jobs:
       POSTGRES_PASSWORD: ci-postgres-password
       PKOS_OWNER_ID: 00000000-0000-0000-0000-000000000001
       PKOS_API_KEY: ci-pkos-api-key-0123456789abcdef0123456789abcdef
-      PKOS_WORKER_ENABLED: "false"
-      PKOS_MEMORY_EXTRACTION_ENABLED: "false"
+      PKOS_WORKER_ENABLED: "true"
+      PKOS_MEMORY_BASE_URL: http://host.docker.internal:18080/v1
+      PKOS_MEMORY_API_KEY: ci-mock-memory-key
+      PKOS_MEMORY_MODEL: ci-memory-model
+      PKOS_MEMORY_EXTRACTION_ENABLED: "true"
+      PKOS_MEMORY_AUTO_PROMOTE_ENABLED: "true"
+      PKOS_MEMORY_AUTO_PROMOTE_MIN_CONFIDENCE: "0.92"
+      PKOS_MEMORY_AUTO_PROMOTE_MIN_IMPORTANCE: "0.65"
     steps:
       - uses: actions/checkout@v4
+      - name: Start deterministic OpenAI-compatible memory provider
+        run: |
+          python3 scripts/mock_openai.py --port 18080 >/tmp/pkos-mock-openai.log 2>&1 &
+          echo $! >/tmp/pkos-mock-openai.pid
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/pkos-mock-openai.log >&2 || true
+          exit 1
       - name: Start production-shaped stack
         run: docker compose up -d --build
       - name: Wait for readiness
@@ -64,11 +82,18 @@ jobs:
           done
           echo "API did not become ready" >&2
           exit 1
-      - name: Exercise authenticated source, memory, graph, and timeline flows
-        run: python3 scripts/smoke_test.py --api-key "$PKOS_API_KEY"
-      - name: Dump container logs on failure
+      - name: Exercise source, capture, automatic memory, graph, and timeline flows
+        run: python3 scripts/smoke_test.py --api-key "$PKOS_API_KEY" --expect-auto-memory
+      - name: Dump logs on failure
         if: failure()
-        run: docker compose logs --no-color
-      - name: Stop stack
+        run: |
+          docker compose logs --no-color
+          echo "--- mock OpenAI provider ---"
+          cat /tmp/pkos-mock-openai.log || true
+      - name: Stop stack and mock provider
         if: always()
-        run: docker compose down -v --remove-orphans
+        run: |
+          docker compose down -v --remove-orphans
+          if [ -f /tmp/pkos-mock-openai.pid ]; then
+            kill "$(cat /tmp/pkos-mock-openai.pid)" 2>/dev/null || true
+          fi

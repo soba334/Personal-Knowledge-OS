@@ -7,9 +7,11 @@ A production-oriented, source-grounded personal memory service for AI applicatio
 ## v1 capabilities
 
 - source ingestion with SHA-256 integrity metadata
+- automatic AI conversation capture through `POST /v1/captures`
+- verifier-gated automatic memory extraction and optional auto-promotion
 - deterministic overlapping chunking and asynchronous embedding jobs
 - OpenAI-compatible embedding provider with lexical-only degradation
-- source-grounded memory candidates with manual approval/rejection
+- source-grounded memory candidates with manual approval/rejection fallback
 - temporal memory supersession (`active -> superseded`) without history loss
 - temporal entity/relation graph with explicit validity windows and source links
 - source timeline ordered by occurrence time with ingestion-time fallback
@@ -20,21 +22,90 @@ A production-oriented, source-grounded personal memory service for AI applicatio
 - constant-time Bearer authentication scoped to `PKOS_OWNER_ID`
 - health/readiness endpoints, Docker deployment, CI, and retrieval evaluation harness
 
-> Automatic memory extraction is intentionally non-activating in v1. Model output must pass a verifier/review boundary before it may become active memory.
+> An LLM never writes directly to active memory. Captured content is persisted as source truth first; extracted memory proposals must pass deterministic grounding and policy checks before the service can promote them.
 
-> Graph writes are also explicit API operations in v1. The service does not allow unverified LLM output to silently rewrite entity or relation history.
+> Graph writes remain explicit API operations. Unverified LLM output cannot silently rewrite entity or relation history.
 
 ## Quick start
 
 ```bash
 cp .env.example .env
-# Set PKOS_API_KEY to a random value of at least 32 bytes.
+# Set PKOS_API_KEY and POSTGRES_PASSWORD to strong random values.
 docker compose up --build
 ```
 
 API defaults to `http://localhost:8080`.
 
-### Ingest a source
+### Enable automatic memory
+
+Configure an OpenAI-compatible chat-completions provider and enable extraction:
+
+```env
+PKOS_MEMORY_BASE_URL=https://api.openai.com/v1
+PKOS_MEMORY_API_KEY=...
+PKOS_MEMORY_MODEL=gpt-5-mini
+PKOS_MEMORY_EXTRACTION_ENABLED=true
+PKOS_MEMORY_AUTO_PROMOTE_ENABLED=true
+PKOS_MEMORY_AUTO_PROMOTE_MIN_CONFIDENCE=0.92
+PKOS_MEMORY_AUTO_PROMOTE_MIN_IMPORTANCE=0.65
+PKOS_MEMORY_KEEP_UNPROMOTED_CANDIDATES=false
+```
+
+`PKOS_MEMORY_BASE_URL` and `PKOS_MEMORY_API_KEY` fall back to `PKOS_OPENAI_BASE_URL` and `PKOS_OPENAI_API_KEY` when omitted.
+
+With auto-promotion enabled, the model proposes memories but the service only activates proposals that pass all of these checks:
+
+- supported durable-memory type
+- source-grounded evidence quote
+- valid confidence and importance values
+- configured promotion thresholds
+- secret-material rejection
+- valid active-memory target for supersession
+
+Low-confidence proposals are discarded by default instead of creating a manual review backlog. Set `PKOS_MEMORY_KEEP_UNPROMOTED_CANDIDATES=true` if you prefer to review them.
+
+### Let AI clients capture conversations automatically
+
+An AI client, agent, gateway, or connector should send each completed interaction to `POST /v1/captures`. The person using the AI does not need to decide what to save.
+
+```bash
+curl -X POST http://localhost:8080/v1/captures \
+  -H "authorization: Bearer $PKOS_API_KEY" \
+  -H 'content-type: application/json' \
+  -d '{
+    "kind":"conversation",
+    "title":"Gateway decision",
+    "provider":"my-agent",
+    "session_id":"session-123",
+    "external_id":"session-123:turn-42",
+    "occurred_at":"2026-09-15T14:00:00Z",
+    "messages":[
+      {"role":"user","content":"Bifrostでいきたいです"},
+      {"role":"assistant","content":"Bifrostを採用方針として整理します"}
+    ],
+    "metadata":{"surface":"chat"}
+  }'
+```
+
+The flow is:
+
+```text
+AI interaction
+    -> /v1/captures
+    -> durable Source
+    -> chunks + indexes
+    -> extract_memories job
+    -> OpenAI-compatible memory model
+    -> deterministic verifier
+    -> threshold/policy gate
+    -> Active Memory
+```
+
+Use a stable `external_id` for retryable events. The existing source uniqueness constraint makes repeated delivery idempotent instead of silently duplicating the same captured interaction.
+
+See [`docs/automatic-capture.md`](docs/automatic-capture.md) for the integration contract and safety model.
+
+### Ingest a source directly
 
 ```bash
 curl -X POST http://localhost:8080/v1/sources \
@@ -59,7 +130,9 @@ curl -X POST http://localhost:8080/v1/search \
 
 When the embedding provider is unavailable, the endpoint continues with lexical retrieval and returns `degraded: true` instead of taking retrieval offline.
 
-### Create and approve a memory candidate
+### Create and approve a memory candidate manually
+
+Manual memory management remains available as a fallback or review workflow:
 
 ```bash
 curl -X POST http://localhost:8080/v1/memories/candidates \
@@ -119,11 +192,12 @@ Relations are not deleted to represent change. Close an old fact with `POST /v1/
 | --- | --- | --- |
 | GET | `/healthz` | process liveness |
 | GET | `/readyz` | database readiness |
+| POST | `/v1/captures` | persist AI interaction source and schedule automatic memory extraction |
 | POST | `/v1/sources` | ingest source and enqueue derived indexing |
 | GET | `/v1/sources/{id}` | retrieve source evidence |
 | POST | `/v1/search` | hybrid source + active-memory retrieval |
 | GET | `/v1/memories` | list memories by lifecycle state |
-| POST | `/v1/memories/candidates` | create evidence-backed candidate |
+| POST | `/v1/memories/candidates` | create evidence-backed candidate manually |
 | GET | `/v1/memories/{id}` | inspect memory and evidence links |
 | POST | `/v1/memories/{id}/approve` | activate and optionally supersede old memory |
 | POST | `/v1/memories/{id}/reject` | reject candidate |
@@ -154,12 +228,13 @@ Populate a private or sanitized Golden dataset representative of real use before
 
 ## Operational invariants
 
-- **Evidence first:** source records are durable evidence; memories cannot be created without existing evidence source IDs.
-- **No silent activation:** model-generated memory stays outside the active memory set until an explicit verification/approval boundary passes.
+- **Evidence first:** the complete normalized capture is persisted as source truth before memory extraction runs.
+- **No direct model writes:** LLM output is only a proposal; deterministic checks and service policy control activation.
+- **Grounded auto-promotion:** automatically active memory must carry source evidence and pass configured confidence/importance thresholds.
 - **Temporal history:** superseded memories and closed relations remain queryable instead of being destructively overwritten.
 - **Tenant boundary:** application reads/writes are scoped to configured `PKOS_OWNER_ID`.
 - **Graceful retrieval degradation:** embedding failure does not disable lexical retrieval.
-- **Durable async work:** embedding jobs use PostgreSQL leases, `SKIP LOCKED`, retries, and terminal failure state.
+- **Durable async work:** embedding and extraction jobs use PostgreSQL leases, `SKIP LOCKED`, retries, and terminal failure state.
 - **Auditable mutation:** source ingestion, memory lifecycle changes, and graph mutations emit audit records.
 - **Bounded APIs:** text lengths, pagination limits, confidence ranges, relation time intervals, and graph identity constraints are validated.
 
@@ -174,20 +249,25 @@ Before exposing the service beyond a trusted private network:
 5. Back up source records, memories, graph history, and audit records; test point-in-time restore where supported.
 6. Build a representative Golden retrieval set and establish release thresholds before changing embeddings, chunking, lexical backend, or ranking weights.
 7. Keep migrations forward-only in production and validate them against a copy of production-shaped data before deployment.
+8. Give capture-producing clients stable event IDs so retries are idempotent.
+9. Do not intentionally route password-manager exports, `.env` files, credential stores, or other secret-bearing sources into automatic capture.
 
 ## Repository layout
 
 ```text
 src/
-  api/               HTTP boundary and input validation
-  services/          chunking, retrieval, embeddings, and worker logic
-  config.rs          validated runtime configuration
-  models.rs          API/domain DTOs
-  storage.rs         source/search/memory/job persistence
-  storage_graph.rs   temporal graph and timeline persistence
-migrations/          forward database schema migrations
-scripts/evaluate.py  retrieval regression evaluator
-eval/                Golden dataset templates
-Dockerfile           API image
-docker/              PostgreSQL extension image
+  api/                       HTTP boundary and input validation
+  services/                  chunking, retrieval, embeddings, extraction, and worker logic
+  config.rs                  validated runtime configuration
+  models.rs                  API/domain DTOs
+  storage.rs                 source/search/memory/job persistence
+  storage_graph.rs           temporal graph and timeline persistence
+migrations/                  forward database schema migrations
+scripts/evaluate.py          retrieval regression evaluator
+scripts/smoke_test.py        production-shaped end-to-end smoke test
+scripts/mock_openai.py       deterministic OpenAI-compatible CI provider
+docs/automatic-capture.md    automatic capture integration and safety contract
+eval/                        Golden dataset templates
+Dockerfile                   API image
+docker/                      PostgreSQL extension image
 ```
