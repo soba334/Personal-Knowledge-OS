@@ -38,6 +38,10 @@ export class PkosClient {
     return payload;
   }
 
+  status() {
+    return this.request("/readyz");
+  }
+
   remember(args) {
     const messages = [{ role: "user", content: args.user_text, name: null }];
     if (args.assistant_context) {

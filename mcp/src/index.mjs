@@ -6,9 +6,11 @@ import { hostHeaderValidation, originValidation, toNodeHandler } from "@modelcon
 import * as z from "zod/v4";
 import { PkosClient } from "./pkos-client.mjs";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 const PORT = Number(process.env.PKOS_MCP_PORT ?? 8787);
-const BIND = process.env.PKOS_MCP_BIND ?? "0.0.0.0";
+// Local execution is loopback-only by default. Docker explicitly binds inside the container
+// and publishes the host port on 127.0.0.1 so Secure MCP Tunnel is the external ingress.
+const BIND = process.env.PKOS_MCP_BIND ?? "127.0.0.1";
 const BACKEND_URL = process.env.PKOS_MCP_API_BASE_URL ?? "http://api:8080";
 const BACKEND_API_KEY = process.env.PKOS_API_KEY ?? "";
 const MCP_BEARER_TOKEN = process.env.PKOS_MCP_BEARER_TOKEN ?? "";
@@ -48,9 +50,11 @@ const INSTRUCTIONS = `Personal Knowledge OS は、ユーザーの長期的な知
 
 次のときは推測だけで答えず、このサーバーを使ってください。
 - 過去の決定、好み、目標、制約、プロジェクト情報を思い出す必要があるとき: search_knowledge
-- ユーザーが新しい長期的な事実・決定・好み・目標・制約を明示したとき: remember
+- ユーザーが新しい長期的な事実・決定・好み・目標・制約・習慣・スキル・プロジェクト更新を明示したとき: remember
 - 会話全体を根拠付きで保存したいとき: capture_conversation
+- 接続状態を確認するとき: pkos_status
 
+ユーザーに「覚えて」と言われるまで待つ必要はありません。将来の会話で役立つと判断でき、ユーザー本人の発言に根拠がある情報は remember を使って保存してください。
 remember の user_text には、ユーザー本人が実際に書いた根拠テキストをできるだけ原文のまま渡してください。パスワード、APIキー、アクセストークン、秘密鍵などの秘密情報は保存しないでください。
 書き込みはActive Memoryを直接変更しません。必ずSource/Captureとして保存され、PKOS側の抽出・根拠検証・自動昇格ポリシーを通ります。`;
 
@@ -68,6 +72,23 @@ const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: t
 const additiveWrite = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 
 function registerTools(server) {
+  server.registerTool(
+    "pkos_status",
+    {
+      title: "Personal Knowledge OS status",
+      description: "Check that the MCP gateway can reach the Personal Knowledge OS backend. / ChatGPTからPKOSへの接続状態を確認します。",
+      annotations: readOnly,
+      inputSchema: z.object({}),
+    },
+    async () => {
+      try {
+        return textResult({ gateway: "ok", backend: await client.status(), version: VERSION });
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  );
+
   server.registerTool(
     "remember",
     {
@@ -253,7 +274,10 @@ createServer((req, res) => {
 
   if (req.url?.startsWith("/.well-known/")) {
     res.writeHead(404, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: "not_found", error_description: "This deployment uses static Bearer authentication, not OAuth." }));
+    res.end(JSON.stringify({
+      error: "not_found",
+      error_description: "This server does not use OAuth. For ChatGPT, use Secure MCP Tunnel and inject the local Bearer credential from the tunnel profile.",
+    }));
     return;
   }
 

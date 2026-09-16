@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end test for the remote PKOS MCP gateway using stateless MCP calls."""
+"""End-to-end test for the PKOS MCP gateway using MCP 2026-07-28 requests."""
 
 from __future__ import annotations
 
@@ -10,26 +10,75 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+PROTOCOL_VERSION = "2026-07-28"
 SENTINEL = "For CI, I decided to let AI capture durable knowledge automatically."
 MEMORY_STATEMENT = "AI should capture durable knowledge automatically."
 
 
-def http_json(
+def client_meta() -> dict[str, Any]:
+    return {
+        "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
+        "io.modelcontextprotocol/clientInfo": {"name": "pkos-ci-probe", "version": "1.0.0"},
+        "io.modelcontextprotocol/clientCapabilities": {},
+    }
+
+
+def parse_mcp_payload(payload: bytes, content_type: str) -> Any:
+    text = payload.decode("utf-8", errors="replace").strip()
+    if not text:
+        raise AssertionError(f"MCP returned an empty body (content-type={content_type!r})")
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Some conforming MCP HTTP responses are framed as SSE even for a one-shot POST.
+    # Accept the last JSON data frame so this probe works with either SDK response mode.
+    frames: list[str] = []
+    current: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("data:"):
+            current.append(line[5:].lstrip())
+        elif not line.strip() and current:
+            frames.append("\n".join(current))
+            current = []
+    if current:
+        frames.append("\n".join(current))
+
+    for frame in reversed(frames):
+        try:
+            return json.loads(frame)
+        except json.JSONDecodeError:
+            continue
+    raise AssertionError(
+        f"MCP response was neither JSON nor parseable SSE (content-type={content_type!r}): {text[:1000]!r}"
+    )
+
+
+def http_mcp(
     base_url: str,
     token: str | None,
     method: str,
     path: str,
     body: dict[str, Any] | None = None,
     *,
+    mcp_method: str | None = None,
+    mcp_name: str | None = None,
     expected_status: int = 200,
-) -> Any:
+) -> tuple[Any, str]:
     headers = {"accept": "application/json, text/event-stream"}
     if token is not None:
         headers["authorization"] = f"Bearer {token}"
-    data = None
     if body is not None:
         headers["content-type"] = "application/json"
-        data = json.dumps(body).encode("utf-8")
+    if mcp_method:
+        headers["MCP-Protocol-Version"] = PROTOCOL_VERSION
+        headers["Mcp-Method"] = mcp_method
+    if mcp_name:
+        headers["Mcp-Name"] = mcp_name
+
+    data = None if body is None else json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         f"{base_url.rstrip('/')}{path}", method=method, headers=headers, data=data
     )
@@ -37,37 +86,51 @@ def http_json(
         with urllib.request.urlopen(req, timeout=20) as response:
             status = response.status
             payload = response.read()
+            content_type = response.headers.get("content-type", "")
     except urllib.error.HTTPError as exc:
         status = exc.code
         payload = exc.read()
+        content_type = exc.headers.get("content-type", "")
+
     if status != expected_status:
-        raise AssertionError(
-            f"{method} {path}: expected {expected_status}, got {status}: "
-            f"{payload.decode('utf-8', errors='replace')}"
-        )
+        rendered = payload.decode("utf-8", errors="replace")
+        raise AssertionError(f"{method} {path}: expected {expected_status}, got {status}: {rendered}")
+
     if not payload:
-        return None
-    return json.loads(payload)
+        return None, content_type
+    if path == "/mcp" and expected_status < 400:
+        return parse_mcp_payload(payload, content_type), content_type
+    try:
+        return json.loads(payload), content_type
+    except json.JSONDecodeError:
+        return payload.decode("utf-8", errors="replace"), content_type
 
 
 def rpc(base_url: str, token: str, request_id: int, method: str, params: dict[str, Any] | None = None) -> Any:
-    payload: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "method": method}
-    if params is not None:
-        payload["params"] = params
-    response = http_json(base_url, token, "POST", "/mcp", payload)
+    merged_params = dict(params or {})
+    merged_params["_meta"] = client_meta()
+    payload: dict[str, Any] = {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": method,
+        "params": merged_params,
+    }
+    response, _ = http_mcp(
+        base_url,
+        token,
+        "POST",
+        "/mcp",
+        payload,
+        mcp_method=method,
+        mcp_name=merged_params.get("name") if method == "tools/call" else None,
+    )
     if response.get("error"):
         raise AssertionError(f"MCP {method} returned error: {response['error']}")
     return response["result"]
 
 
 def call_tool(base_url: str, token: str, request_id: int, name: str, arguments: dict[str, Any]) -> Any:
-    result = rpc(
-        base_url,
-        token,
-        request_id,
-        "tools/call",
-        {"name": name, "arguments": arguments},
-    )
+    result = rpc(base_url, token, request_id, "tools/call", {"name": name, "arguments": arguments})
     if result.get("isError"):
         raise AssertionError(f"MCP tool {name} failed: {result}")
     content = result.get("content") or []
@@ -77,22 +140,24 @@ def call_tool(base_url: str, token: str, request_id: int, name: str, arguments: 
 
 
 def run(base_url: str, token: str) -> None:
-    health = http_json(base_url, None, "GET", "/healthz")
+    health, _ = http_mcp(base_url, None, "GET", "/healthz")
     if health.get("status") != "ok":
         raise AssertionError(f"MCP health is not ok: {health}")
 
-    http_json(
+    http_mcp(
         base_url,
         None,
         "POST",
         "/mcp",
-        {"jsonrpc": "2.0", "id": 0, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 0, "method": "tools/list", "params": {"_meta": client_meta()}},
+        mcp_method="tools/list",
         expected_status=401,
     )
 
     listed = rpc(base_url, token, 1, "tools/list")
     tools = {tool["name"]: tool for tool in listed.get("tools", [])}
     required = {
+        "pkos_status",
         "remember",
         "capture_conversation",
         "search_knowledge",
@@ -109,10 +174,14 @@ def run(base_url: str, token: str) -> None:
     if tools["remember"].get("annotations", {}).get("destructiveHint") is not False:
         raise AssertionError("remember must advertise destructiveHint=false")
 
+    status = call_tool(base_url, token, 2, "pkos_status", {})
+    if status.get("gateway") != "ok":
+        raise AssertionError(f"pkos_status did not report gateway ok: {status}")
+
     remembered = call_tool(
         base_url,
         token,
-        2,
+        3,
         "remember",
         {
             "user_text": SENTINEL,
@@ -126,7 +195,7 @@ def run(base_url: str, token: str) -> None:
     if not remembered.get("memory_extraction_scheduled"):
         raise AssertionError("MCP remember did not schedule automatic memory extraction")
 
-    source = call_tool(base_url, token, 3, "get_source", {"id": source_id})
+    source = call_tool(base_url, token, 4, "get_source", {"id": source_id})
     if SENTINEL not in source.get("content", ""):
         raise AssertionError("MCP get_source lost the verbatim user evidence")
     capture_meta = source.get("metadata", {}).get("pkos_capture", {})
@@ -136,7 +205,7 @@ def run(base_url: str, token: str) -> None:
     search = call_tool(
         base_url,
         token,
-        4,
+        5,
         "search_knowledge",
         {"query": "capture durable knowledge automatically", "limit": 10},
     )
